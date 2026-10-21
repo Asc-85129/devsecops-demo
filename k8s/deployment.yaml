@@ -20,4 +20,5 @@ spec:
         - name: demo-app
           image: nginx:latest   # placeholder image so the deployment itself is easy to apply
           ports:
-            - containerPort: 80
+            - name: http
+              containerPort: 80

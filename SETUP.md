@@ -1,5 +1,11 @@
 # Setup guide (macOS)
 
+> **Windows:** the same steps work from Git Bash with Docker Desktop. Download `kind`, `helm` and
+> `argocd` as `.exe` files from their GitHub releases into a folder on your `PATH` instead of using
+> Homebrew. `k8s/deployment.fixed.yaml` runs the real app image, so build and load it into kind
+> first: `docker build -f Dockerfile.fixed -t demo-app:fixed .` (after `cp app.fixed.py app.py` and
+> `cp requirements.fixed.txt requirements.txt`) then `kind load docker-image demo-app:fixed --name devsecops-demo`.
+
 Do all of this now, tested end-to-end, so nothing is "first time" on stage tomorrow.
 
 ## 0. Check what you already have

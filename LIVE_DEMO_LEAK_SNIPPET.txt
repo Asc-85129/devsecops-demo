@@ -1,10 +1,21 @@
-During the live demo, add this block to config.py (create the file) and push, to trigger Gitleaks:
+During the live demo, create config.py with the block below and push, to trigger Gitleaks.
+REMOVE THE HYPHEN AND THE SPACES when you paste - they are only there so this instructions file itself
+doesn't trip GitHub push protection / Gitleaks:
 
-AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE"
-AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+AWS_ACCESS_KEY_ID = "AKIA-VH7V7Q6SOIOJNN5J"
+AWS_SECRET_ACCESS_KEY = "grWWtV9 k3zlCyF cGaZZjp I8MCP3d 0fNvd70 4PgMj"
 
-Note: these are AWS's own public documentation placeholder values (used in every AWS SDK example),
-not a real key. Gitleaks matches on the key FORMAT (AKIA... pattern), so it still fires — no real
-credential is ever exposed. Never paste an actual key into a public repo, even for a demo.
+Note: these values were generated randomly in the AWS key FORMAT (AKIA + 16 base32 chars, 40-char
+secret). They were never issued by AWS and grant no access. Gitleaks matches on the format, so it fires.
 
-After showing the failed build + Slack alert, delete config.py (or empty it) and push again to show green.
+Why not AWS's documentation key (AKIAIOSFODNN7EXAMPLE)? Gitleaks v8 allowlists keys ending in
+"EXAMPLE" precisely because they appear in every SDK sample - it reports "no leaks found" for them,
+so the demo would silently pass. Never paste an actual key into a public repo, even for a demo.
+
+Expect TWO layers to fire:
+  1. GitHub push protection rejects the push (GH013). Because the key is fake, bypass it for the demo
+     ("It's used in tests") using the URL GitHub prints, then push again.
+  2. Gitleaks in the pipeline fails the "Secrets" job -> Slack alert.
+
+After showing the failed build + Slack alert, delete config.py and push again to show green.
+In real life a leaked key must also be ROTATED (deleting the file does not remove it from Git history).

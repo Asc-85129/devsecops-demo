@@ -3,61 +3,122 @@ name: DevSecOps Pipeline
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
+permissions:
+  contents: read
+
+# Scanner images are pinned by digest so a re-tagged upstream image can't silently change the pipeline.
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.62.1@sha256:fc10faf341a1d8fa8256c5ff1a6662ef74dd38b65034c8ce42346cf958a02d5d
+
+# Every security gate runs as its own job, in parallel, so one failing gate never hides the
+# results of the others. The Slack job at the end fires if ANY gate failed.
 jobs:
-  security-scan:
+  # 1. Secret scanning
+  secrets:
+    name: 1 - Secrets (Gitleaks)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      # 1. Secret scanning
-      - name: Gitleaks - scan for secrets
+      - name: Gitleaks - scan commits for secrets
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2. SAST
+  # 2. SAST
+  sast:
+    name: 2 - SAST (Semgrep)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep:1.119.0@sha256:f552de9f1ad268552aaea0487a9c1694eb08071b01ff3e51fbdb02420ce828a6
+    steps:
+      - uses: actions/checkout@v4
+      # p/ci = generic CI ruleset, p/flask adds the Flask taint rules that catch the SQL injection
       - name: Semgrep - static analysis
-        uses: returntocorp/semgrep-action@v1
-        with:
-          config: p/ci
+        run: semgrep scan --config p/ci --config p/flask --error --metrics=off
 
-      # 3. Dependency / CVE scanning (source)
-      - name: Trivy - filesystem scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: fs
-          scan-ref: requirements.txt
-          severity: HIGH,CRITICAL
-          exit-code: 1
+  # 3. Dependency / CVE scanning (source)
+  sca:
+    name: 3 - Dependencies (Trivy fs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy - filesystem scan of requirements.txt
+        run: >
+          docker run --rm -v "$PWD:/src" $TRIVY_IMAGE
+          fs --scanners vuln --severity HIGH,CRITICAL --exit-code 1 /src
 
-      # 4. Dockerfile lint (catches missing USER, i.e. running as root)
+  # 4. Dockerfile lint + misconfiguration (catches missing USER, i.e. running as root)
+  dockerfile:
+    name: 4 - Dockerfile (Hadolint + Trivy config)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Hadolint - Dockerfile lint
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: Dockerfile
+      # Hadolint only flags an explicit "USER root"; Trivy's DS002 flags a Dockerfile with no USER at all
+      - name: Trivy - Dockerfile misconfiguration scan
+        run: >
+          docker run --rm -v "$PWD:/src" $TRIVY_IMAGE
+          config --severity HIGH,CRITICAL --exit-code 1 /src/Dockerfile
 
-      # 5. Build image
+  # 5. Build the image, scan it, then attack the running container (DAST)
+  image:
+    name: 5 - Build, image scan & DAST (Trivy + ZAP)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Build image
         run: docker build -t demo-app:${{ github.sha }} .
 
-      # 6. Container image CVE scan
+      # Report-only: base-image OS CVEs are outside this demo's control
       - name: Trivy - image scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: demo-app:${{ github.sha }}
-          severity: HIGH,CRITICAL
-          exit-code: 0
-          ignore-unfixed: true
+        run: >
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock $TRIVY_IMAGE
+          image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 demo-app:${{ github.sha }}
 
-      # 7. Slack alert on any failure above
+      - name: Run container for DAST
+        run: |
+          docker run -d --name demo-app -p 5000:5000 -e HOST=0.0.0.0 demo-app:${{ github.sha }}
+          for i in $(seq 1 20); do curl -fs http://localhost:5000/health && exit 0; sleep 1; done
+          docker logs demo-app; exit 1
+
+      # Report-only (-I): ZAP warnings are published as an artifact, not a hard gate
+      - name: OWASP ZAP - baseline scan
+        run: |
+          mkdir -p zap && chmod 777 zap
+          docker run --rm --network host -v "$PWD/zap:/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://localhost:5000 -r zap-report.html -I
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: zap/zap-report.html
+
+  # 6. Slack alert on any failure above
+  notify:
+    name: 6 - Slack alert
+    runs-on: ubuntu-latest
+    needs: [secrets, sast, sca, dockerfile, image]
+    if: failure()
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+      SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+    steps:
       - name: Slack alert
-        if: failure()
+        if: env.SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v1.27.0
         with:
           payload: |
-            {"text": "🚨 DevSecOps pipeline FAILED on ${{ github.repository }} — commit ${{ github.sha }} by ${{ github.actor }}"}
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+            {"text": "🚨 DevSecOps pipeline FAILED on ${{ github.repository }} — commit ${{ github.sha }} by ${{ github.actor }}\nGates: secrets=${{ needs.secrets.result }}, sast=${{ needs.sast.result }}, sca=${{ needs.sca.result }}, dockerfile=${{ needs.dockerfile.result }}, image=${{ needs.image.result }}\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
+      - name: Slack webhook not configured
+        if: env.SLACK_WEBHOOK_URL == ''
+        run: echo "::warning::SLACK_WEBHOOK secret is not set - add it under Settings > Secrets and variables > Actions to get Slack alerts."

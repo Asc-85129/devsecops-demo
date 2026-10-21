@@ -7,4 +7,4 @@ spec:
     app: demo-app
   ports:
     - port: 80
-      targetPort: 80
+      targetPort: http   # named port: 80 on the nginx placeholder, 5000 on the real app

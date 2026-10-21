@@ -1,0 +1,63 @@
+# Hardened version of deployment.yaml. Runs the real app image built from Dockerfile.fixed
+# (load it into kind first:  docker build -f Dockerfile.fixed -t demo-app:fixed .
+#                            kind load docker-image demo-app:fixed --name devsecops-demo)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  labels:
+    app: demo-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-app
+  template:
+    metadata:
+      labels:
+        app: demo-app
+    spec:
+      # FIXED: pod-level securityContext - this is what the Kyverno policy checks for
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
+      containers:
+        - name: demo-app
+          image: demo-app:fixed
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 5000
+          env:
+            - name: DB_PATH
+              value: /tmp/demo.db
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

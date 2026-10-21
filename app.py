@@ -5,9 +5,11 @@ DO NOT deploy this anywhere real. It exists to be caught by scanners.
 from flask import Flask, request
 import sqlite3
 import os
+import tempfile
 
 app = Flask(__name__)
-DB_PATH = os.path.join(os.path.dirname(__file__), "demo.db")
+# Writable location for the SQLite file (the image filesystem may be read-only or owned by root)
+DB_PATH = os.environ.get("DB_PATH", os.path.join(tempfile.gettempdir(), "demo.db"))
 
 
 def get_db():
@@ -29,7 +31,7 @@ def home():
 def get_user():
     name = request.args.get("name", "")
     conn = get_db()
-    query = "SELECT id, username, role FROM users WHERE username = '" + name + "'"  # nosec - intentional for demo
+    query = "SELECT id, username, role FROM users WHERE username = '" + name + "'"  # intentional for demo
     cursor = conn.execute(query)
     rows = cursor.fetchall()
     return {"results": rows}

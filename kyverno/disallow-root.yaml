@@ -8,8 +8,14 @@ spec:
   rules:
     - name: check-runAsNonRoot
       match:
-        resources:
-          kinds: ["Pod"]
+        any:
+          - resources:
+              kinds: ["Pod"]
+      # Platform namespaces run their own (vendor-managed) pods; don't let the demo policy break them
+      exclude:
+        any:
+          - resources:
+              namespaces: ["kube-system", "kyverno", "argocd", "local-path-storage"]
       validate:
         message: "Running as root is not allowed. Set spec.securityContext.runAsNonRoot: true."
         pattern:
