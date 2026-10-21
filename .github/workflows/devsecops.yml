@@ -20,11 +20,11 @@ jobs:
     name: 1 - Secrets (Gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Gitleaks - scan commits for secrets
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -35,7 +35,7 @@ jobs:
     container:
       image: semgrep/semgrep:1.119.0@sha256:f552de9f1ad268552aaea0487a9c1694eb08071b01ff3e51fbdb02420ce828a6
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # p/ci = generic CI ruleset, p/flask adds the Flask taint rules that catch the SQL injection
       - name: Semgrep - static analysis
         run: semgrep scan --config p/ci --config p/flask --error --metrics=off
@@ -45,7 +45,7 @@ jobs:
     name: 3 - Dependencies (Trivy fs)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Trivy - filesystem scan of requirements.txt
         run: >
           docker run --rm -v "$PWD:/src" $TRIVY_IMAGE
@@ -56,7 +56,7 @@ jobs:
     name: 4 - Dockerfile (Hadolint + Trivy config)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Hadolint - Dockerfile lint
         uses: hadolint/hadolint-action@v3.1.0
         with:
@@ -72,7 +72,7 @@ jobs:
     name: 5 - Build, image scan & DAST (Trivy + ZAP)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build image
         run: docker build -t demo-app:${{ github.sha }} .
@@ -98,7 +98,7 @@ jobs:
 
       - name: Upload ZAP report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: zap-report
           path: zap/zap-report.html
