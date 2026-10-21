@@ -1,6 +1,8 @@
 """
-Intentionally vulnerable demo app for a DevSecOps CI/CD talk.
-DO NOT deploy this anywhere real. It exists to be caught by scanners.
+Fixed version of the demo app. Swap it in live with:  cp app.fixed.py app.py
+Changes vs app.py: parameterised SQL query (CWE-89 fixed), input length check,
+basic security headers (picked up by the ZAP baseline scan), and the bind
+address comes from $HOST instead of a hard-coded 0.0.0.0.
 """
 from flask import Flask, request
 import sqlite3
@@ -20,20 +22,32 @@ def get_db():
     return conn
 
 
+@app.after_request
+def security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+    return response
+
+
 @app.route("/")
 def home():
     return "DevSecOps demo app is running. Try /user?name=admin"
 
 
-# --- INTENTIONAL VULNERABILITY: SQL Injection (CWE-89) ---
-# Semgrep should flag this during the SAST step of the pipeline.
+# FIXED: user input is passed as a bound parameter, never concatenated into SQL
 @app.route("/user")
 def get_user():
     name = request.args.get("name", "")
+    if len(name) > 64:
+        return {"error": "name too long"}, 400
     conn = get_db()
-    query = "SELECT id, username, role FROM users WHERE username = '" + name + "'"  # intentional for demo
-    cursor = conn.execute(query)
+    cursor = conn.execute("SELECT id, username, role FROM users WHERE username = ?", (name,))
     rows = cursor.fetchall()
+    conn.close()
     return {"results": rows}
 
 
@@ -43,4 +57,5 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    # FIXED: localhost by default; the container image opts in to 0.0.0.0 via HOST
+    app.run(host=os.environ.get("HOST", "127.0.0.1"), port=5000)

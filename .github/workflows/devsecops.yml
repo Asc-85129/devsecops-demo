@@ -8,7 +8,8 @@ on:
 permissions:
   contents: read
 
-# Scanner images are pinned by digest so a re-tagged upstream image can't silently change the pipeline.
+# Actions are pinned to commit SHAs and scanner images to digests, so a re-tagged upstream
+# action or image (as in the trivy-action compromise) can't silently change the pipeline.
 env:
   TRIVY_IMAGE: aquasec/trivy:0.62.1@sha256:fc10faf341a1d8fa8256c5ff1a6662ef74dd38b65034c8ce42346cf958a02d5d
 
@@ -20,11 +21,11 @@ jobs:
     name: 1 - Secrets (Gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
       - name: Gitleaks - scan commits for secrets
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -35,7 +36,7 @@ jobs:
     container:
       image: semgrep/semgrep:1.119.0@sha256:f552de9f1ad268552aaea0487a9c1694eb08071b01ff3e51fbdb02420ce828a6
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       # p/ci = generic CI ruleset, p/flask adds the Flask taint rules that catch the SQL injection
       - name: Semgrep - static analysis
         run: semgrep scan --config p/ci --config p/flask --error --metrics=off
@@ -45,7 +46,7 @@ jobs:
     name: 3 - Dependencies (Trivy fs)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Trivy - filesystem scan of requirements.txt
         run: >
           docker run --rm -v "$PWD:/src" $TRIVY_IMAGE
@@ -56,9 +57,9 @@ jobs:
     name: 4 - Dockerfile (Hadolint + Trivy config)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Hadolint - Dockerfile lint
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
         with:
           dockerfile: Dockerfile
       # Hadolint only flags an explicit "USER root"; Trivy's DS002 flags a Dockerfile with no USER at all
@@ -72,7 +73,7 @@ jobs:
     name: 5 - Build, image scan & DAST (Trivy + ZAP)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Build image
         run: docker build -t demo-app:${{ github.sha }} .
@@ -93,12 +94,12 @@ jobs:
       - name: OWASP ZAP - baseline scan
         run: |
           mkdir -p zap && chmod 777 zap
-          docker run --rm --network host -v "$PWD/zap:/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable \
+          docker run --rm --network host -v "$PWD/zap:/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable@sha256:5ccfff9a411743ab2615136a2edd7416bec9ce41572fa94e935df38c14adb2b6 \
             zap-baseline.py -t http://localhost:5000 -r zap-report.html -I
 
       - name: Upload ZAP report
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: zap-report
           path: zap/zap-report.html
@@ -111,12 +112,13 @@ jobs:
     if: failure()
     env:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
-      SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
     steps:
       - name: Slack alert
         if: env.SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v1.27.0
+        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
         with:
+          webhook: ${{ env.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
           payload: |
             {"text": "🚨 DevSecOps pipeline FAILED on ${{ github.repository }} — commit ${{ github.sha }} by ${{ github.actor }}\nGates: secrets=${{ needs.secrets.result }}, sast=${{ needs.sast.result }}, sca=${{ needs.sca.result }}, dockerfile=${{ needs.dockerfile.result }}, image=${{ needs.image.result }}\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
       - name: Slack webhook not configured
